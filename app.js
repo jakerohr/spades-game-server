@@ -236,6 +236,6 @@ async function initTeams(id) {
 function getEmptyTeam() {
   return teams[1].players.length < 2 ? teams[1] : teams[2];
 }
-Http.listen(3000, '192.168.0.8', () => {
+Http.listen(3000, () => {
   console.log('listening at :3000...');
 });
