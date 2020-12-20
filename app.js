@@ -3,7 +3,7 @@ const Express = require('express')();
 const Http = require('http').Server(Express);
 const corsOrigin =
   process.env.NODE_ENV === 'production'
-    ? 'https://spades-game.netlify.app/'
+    ? 'https://spades-game.netlify.app'
     : 'http://192.168.0.8:8080';
 const io = require('socket.io')(Http, {
   cors: {
