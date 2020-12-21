@@ -129,6 +129,18 @@ io.on('connection', async (socket) => {
       io.emit('startRound', true, openingHand);
     }
   });
+  socket.on('playCard', async (card) => { 
+    console.log(card);
+    const player = getPlayer(socket.id);
+    const hand = player.hand;
+    const cardIndex = hand.findIndex(item => item.id === card.id);
+    console.log(hand)
+    console.log(cardIndex)
+    if (cardIndex === -1) return
+    hand.splice(cardIndex, 1);
+    await updatePlayerProp(socket.id, 'hand', hand);
+    updatePlayers(players);
+  }) 
 
   // card functions
   function shuffleDeck(deck) {
@@ -218,9 +230,12 @@ function getDeck() {
       deck.push(card);
     }
   }
+  deck.forEach((card, index) => {
+    card.id = index;
+  })
   return deck;
 }
-
+// TODO: what's fire???
 function fire() {
   return players.filter((player) => player.bid).length === 4;
 }
