@@ -1,10 +1,13 @@
 const names = require('./names/game-of-thrones');
 const Express = require('express')();
 const Http = require('http').Server(Express);
+const ip = require("ip");
+
 const corsOrigin =
   process.env.NODE_ENV === 'production'
     ? 'https://spades-game.netlify.app'
-    : 'http://192.168.0.8:8080';
+    : `http://${ip.address()}:8080`;
+    console.log(corsOrigin)
 const io = require('socket.io')(Http, {
   cors: {
     origin: corsOrigin,
