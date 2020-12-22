@@ -36,7 +36,9 @@ let orderSet = false;
 let playerOrder = [];
 let hotseat = 0;
 let dealer = 0;
+let suitPlayed = '';
 let openingHand = false;
+let cardsPlayedThisHand = [];
 let players = [];
 let teams = [
   {
@@ -52,16 +54,17 @@ let teams = [
     players: [],
   },
 ];
-bids: [{ teamOne: 0 }, { teamTwo: 0 }];
-const deck = getDeck();
-let cardsDealt = false;
+// bids: [{ teamOne: 0 }, { teamTwo: 0 }];
+// const deck = getDeck();
+// let cardsDealt = false;
 
 io.on('connection', async (socket) => {
   console.log('a user connected ' + socket.id);
-  await players.push({
+  players.push({
     id: socket.id,
     name: getRandomName(),
     hand: [],
+    tricksTaken: 0,
     ready: true,
   });
   await socket.emit('newPlayer', socket.id, players);
@@ -76,7 +79,7 @@ io.on('connection', async (socket) => {
 
   socket.on('addPlayer', async (name) => {
     const player = updatePlayerProp(socket.id, 'name', name);
-    await getTeam('No Team').players.push(player);
+    getTeam('No Team').players.push(player);
     if (players.length === 4) {
       io.emit('fullGame', true);
     }
@@ -104,7 +107,7 @@ io.on('connection', async (socket) => {
   });
 
   socket.on('shuffleDeck', async () => {
-    const newDeck = await getDeck();
+    const newDeck = getDeck();
     await dealCards(shuffleDeck(newDeck));
     await updatePlayers(players);
     let cardsDealt = true;
@@ -112,8 +115,8 @@ io.on('connection', async (socket) => {
   });
   socket.on('selectTeam', async (team) => {
     const player = getPlayer(socket.id);
-    await clearPlayerFromTeams(player);
-    await getTeam(team).players.push(player);
+    clearPlayerFromTeams(player);
+    getTeam(team).players.push(player);
     await updatePlayerProp(id, 'team', team);
     updateTeams(teams);
   });
@@ -123,23 +126,43 @@ io.on('connection', async (socket) => {
     await setBids(player);
     updatePlayers(players);
     updateTeams(teams);
-    if (fire()) {
+    if (bidsIn()) {
       openingHand = true;
-      io.emit('nextTurn', dealer);
-      io.emit('startRound', true, openingHand);
+      hotseat = dealer;
+      io.emit('nextTurn', hotseat);
+      io.emit('openingHand', openingHand);
+      io.emit('startRound', true);
     }
   });
   socket.on('playCard', async (card) => { 
-    console.log(card);
+    io.emit('winningPlayer');
+
+    if (!suitPlayed) {
+      const suit = openingHand ? 'C' : card.suit
+      setSuit(suit);
+    }
     const player = getPlayer(socket.id);
     const hand = player.hand;
     const cardIndex = hand.findIndex(item => item.id === card.id);
-    console.log(hand)
-    console.log(cardIndex)
     if (cardIndex === -1) return
     hand.splice(cardIndex, 1);
     await updatePlayerProp(socket.id, 'hand', hand);
-    updatePlayers(players);
+    updateHand(card, socket.id);
+    io.emit('layCard', card, socket.id);
+    if (cardsPlayedThisHand.length === 4) {
+      const winningHand = determineWinner();
+      const winningPlayer = getPlayer(winningHand.id);
+      const tricks = winningPlayer.tricksTaken + 1;
+      await updatePlayerProp(winningPlayer.id, 'tricksTaken', tricks);
+      io.emit('winningPlayer', winningPlayer.name);
+      resetHand(winningPlayer.id);
+    } else {
+      updateHotseat();
+    }
+    await updatePlayers(players);
+    io.emit('nextTurn', hotseat);
+
+
   }) 
 
   // card functions
@@ -157,11 +180,9 @@ io.on('connection', async (socket) => {
     return newDeck;
   }
   async function dealCards(deck) {
-    console.table(deck);
-    await players.forEach((player) => {
+    players.forEach((player) => {
       player.hand = [];
     });
-    console.table(players);
     await dealLoop(players, deck);
 
     return players;
@@ -174,6 +195,20 @@ io.on('connection', async (socket) => {
       }
     }
     return players;
+  }
+  function setSuit(suit) {
+    suitPlayed = suit || ''
+    io.emit('setSuit', suitPlayed);
+  }
+  function resetHand(id) {
+    cardsPlayedThisHand = [];
+    openingHand = false;
+    io.emit('openingHand', openingHand);
+    io.emit('clearBoard');
+    playerIndex = players.findIndex(player => player.id === id);
+    setSuit();
+    hotseat = playerIndex;
+    return hotseat;
   }
   socket.on('disconnect', async () => {
     console.log('disconnected ' + socket.id);
@@ -194,6 +229,14 @@ function updateTeams(teams) {
   io.emit('updateTeams', teams);
   return teams;
 }
+function updateHotseat() {
+  hotseat = hotseat < 3 ? hotseat + 1 : 0;
+  return hotseat;
+}
+function updateHand(card, id) {
+  cardsPlayedThisHand.push({ id, card });
+  return cardsPlayedThisHand;
+}
 function updatePlayerProp(id, prop, value) {
   const player = players.find((player) => player.id === id);
   player[prop] = value;
@@ -212,7 +255,6 @@ function getPlayer(id) {
   return players.find((player) => player.id === id);
 }
 function clearPlayerFromTeams(playerData) {
-  console.log(teams);
   teams.forEach((team) => {
     const newPlayerArray = team.players.filter(
       (player) => player !== playerData
@@ -220,8 +262,17 @@ function clearPlayerFromTeams(playerData) {
     team.players = newPlayerArray;
     return team;
   });
-  console.log(teams);
 }
+function determineWinner() {
+  // check for high spade
+  const spades = cardsPlayedThisHand.filter(hand => hand.card.suit === 'S')
+  const matchedSuits = cardsPlayedThisHand.filter(hand => hand.card.suit === suitPlayed)
+  const arrayToCheck = spades.length ? spades : matchedSuits;
+  const cardRank = arrayToCheck.reduce((max, item) => item.card.rank > max ? item.card.rank : max, arrayToCheck[0].card.rank);
+  const winningCard = arrayToCheck.find(item => item.card.rank === cardRank);
+  return cardsPlayedThisHand.find(hand => hand.card.id  === winningCard.card.id)
+}
+
 function getDeck() {
   var deck = new Array();
   for (var i = 0; i < suits.length; i++) {
@@ -235,8 +286,7 @@ function getDeck() {
   })
   return deck;
 }
-// TODO: what's fire???
-function fire() {
+function bidsIn() {
   return players.filter((player) => player.bid).length === 4;
 }
 
@@ -249,9 +299,9 @@ function getRandomName() {
 // temp init teams
 async function initTeams(id) {
   const player = getPlayer(id);
-  await clearPlayerFromTeams(player);
+  clearPlayerFromTeams(player);
   const team = getEmptyTeam();
-  await team.players.push(player);
+  team.players.push(player);
   await updatePlayerProp(id, 'team', team.name);
   updateTeams(teams);
 }
