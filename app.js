@@ -39,6 +39,7 @@ let suitPlayed = '';
 let openingHand = false;
 let spadesBroken = false;
 let cardsPlayedThisHand = [];
+let scoreUpdated = false;
 let totalScore = {
   teamOne: 0,
   teamTwo: 0,
@@ -80,14 +81,17 @@ io.on('connection', async (socket) => {
   });
 
   socket.on('addPlayer', async (name) => {
-    const player = updatePlayerProp(socket.id, 'name', name);
+    const player = getPlayer(socket.id);
+    if (name) {
+      updatePlayerProp(player.id, 'name', name);
+    }
     getTeam('No Team').players.push(player);
     if (players.length === 4) {
       io.emit('fullGame', true);
     }
     cardsPlayedThisHand = [];
-    updatePlayers(players);
     updateTeams(teams);
+    updatePlayers(players);
   });
 
   socket.on('playerReady', async (value) => {
@@ -103,13 +107,12 @@ io.on('connection', async (socket) => {
       let index = 0;
       for (let i = 0; i < 4; i++) {
         playerOrder.push(teams[index].shift());
-        
         index = index === 0 ? 1 : 0;
       }
-      
       players = playerOrder;
     }
     updatePlayers(players);
+    io.to(players[dealer].id).emit('dealPrompt')
     orderSet = true;
   });
 
@@ -144,7 +147,9 @@ io.on('connection', async (socket) => {
     }
   });
   socket.on('sendScores', async (data) => {
-    await tallyScore(data);
+    if (!scoreUpdated) {
+      await tallyScore(data);
+    }
   });
   socket.on('playCard', async (card) => { 
     io.emit('winningPlayer');
@@ -200,6 +205,7 @@ io.on('connection', async (socket) => {
     // shuffle
   }
   async function tallyScore(data) {
+    scoreUpdated = true;
     const calculatedScores = await data.map(item => {
       let finalScore;
       const tricksOverBid = item.tricks - item.bids;
