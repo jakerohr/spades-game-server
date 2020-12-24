@@ -7,7 +7,6 @@ const corsOrigin =
   process.env.NODE_ENV === 'production'
     ? 'https://spades-game.netlify.app'
     : `http://${ip.address()}:8080`;
-    console.log(corsOrigin)
 const io = require('socket.io')(Http, {
   cors: {
     origin: corsOrigin,
@@ -31,14 +30,19 @@ const values = [
   'K',
   'A',
 ];
-const playerNames = [];
 let orderSet = false;
-let playerOrder = [];
 let hotseat = 0;
+let handsPlayed = 0;
 let dealer = 0;
+let winner = false;
 let suitPlayed = '';
 let openingHand = false;
+let spadesBroken = false;
 let cardsPlayedThisHand = [];
+let totalScore = {
+  teamOne: 0,
+  teamTwo: 0,
+};
 let players = [];
 let teams = [
   {
@@ -54,22 +58,20 @@ let teams = [
     players: [],
   },
 ];
-// bids: [{ teamOne: 0 }, { teamTwo: 0 }];
-// const deck = getDeck();
-// let cardsDealt = false;
 
 io.on('connection', async (socket) => {
   console.log('a user connected ' + socket.id);
   players.push({
     id: socket.id,
+    bid: null,
     name: getRandomName(),
     hand: [],
     tricksTaken: 0,
-    ready: true,
+    ready: false,
   });
   await socket.emit('newPlayer', socket.id, players);
   // temp init teams method
-  await initTeams(socket.id);
+  // await initTeams(socket.id);
   updatePlayers(players);
   updateTeams(teams);
 
@@ -83,6 +85,7 @@ io.on('connection', async (socket) => {
     if (players.length === 4) {
       io.emit('fullGame', true);
     }
+    cardsPlayedThisHand = [];
     updatePlayers(players);
     updateTeams(teams);
   });
@@ -93,13 +96,17 @@ io.on('connection', async (socket) => {
   });
   socket.on('setPlayOrder', async () => {
     if (!orderSet) {
-      teamArray = teams;
-      let index = 1;
+      let playerOrder = [];
+      let teamOneArray = players.filter(player => player.team === 'Team One');
+      let teamTwoArray = players.filter(player => player.team === 'Team Two');
+      let teams = [teamOneArray, teamTwoArray];
+      let index = 0;
       for (let i = 0; i < 4; i++) {
-        playerOrder.push(teamArray[index].players.shift());
-
-        index = index === 1 ? 2 : 1;
+        playerOrder.push(teams[index].shift());
+        
+        index = index === 0 ? 1 : 0;
       }
+      
       players = playerOrder;
     }
     updatePlayers(players);
@@ -132,11 +139,23 @@ io.on('connection', async (socket) => {
       io.emit('nextTurn', hotseat);
       io.emit('openingHand', openingHand);
       io.emit('startRound', true);
+      let cardsDealt = false;
+      io.emit('cardsDealt', cardsDealt)
     }
+  });
+  socket.on('sendScores', async (data) => {
+    await tallyScore(data);
   });
   socket.on('playCard', async (card) => { 
     io.emit('winningPlayer');
-
+    if (winner) {
+      io.emit('clearBoard');
+      winner = false;
+    }
+    if (card.suit === 'S') {
+      spadesBroken = true;
+      io.emit('spadesBroken', spadesBroken);
+    }
     if (!suitPlayed) {
       const suit = openingHand ? 'C' : card.suit
       setSuit(suit);
@@ -152,19 +171,72 @@ io.on('connection', async (socket) => {
     if (cardsPlayedThisHand.length === 4) {
       const winningHand = determineWinner();
       const winningPlayer = getPlayer(winningHand.id);
+      winner = true;
       const tricks = winningPlayer.tricksTaken + 1;
       await updatePlayerProp(winningPlayer.id, 'tricksTaken', tricks);
       io.emit('winningPlayer', winningPlayer.name);
       resetHand(winningPlayer.id);
+      if (handsPlayed === 13) {
+        roundOver();
+      }
     } else {
       updateHotseat();
     }
     await updatePlayers(players);
     io.emit('nextTurn', hotseat);
-
-
   }) 
-
+  function roundOver() {
+    io.emit('getScore')
+    dealer = dealer < 3 ? dealer + 1 : 0;
+    io.emit('clearBoard');
+    io.to(players[dealer].id).emit('dealPrompt')
+    players.forEach(player => {
+      updatePlayerProp(player.id, 'tricksTaken', 0);
+      updatePlayerProp(player.id, 'bid', null);
+      updatePlayerProp(player.id, 'hand', []);
+    })
+    // display winning team
+    // reset stuff
+    // shuffle
+  }
+  async function tallyScore(data) {
+    const calculatedScores = await data.map(item => {
+      let finalScore;
+      const tricksOverBid = item.tricks - item.bids;
+      if (tricksOverBid < 0) {
+        finalScore = tricksOverBid * 10;
+      } else {
+        finalScore = (item.bids * 10) + tricksOverBid;
+      }
+      return {
+        team: item.team,
+        score: finalScore,
+      }
+    })
+    await updateTotalScore(calculatedScores)
+    return calculatedScores;
+  }
+  async function updateTotalScore(scores) {
+    scores.forEach(item => {
+      totalScore[item.team] += item.score
+    });
+    io.emit('displayScores', totalScore);
+    gameWinner = gameOver();
+    if (gameWinner) {
+      io.emit('gameOver', gameWinner);
+    }
+    return totalScore;
+  }
+  function gameOver() {
+    winningScores = (Object.keys(totalScore).filter(key => totalScore[key] >= 500))
+    
+    if (winningScores.length === 1) {
+      return winningScores[0]
+    } else if (winningScores.length === 2) {
+      return Object.keys(totalScore).reduce((a, b) => totalScore[a] > totalScore[b] ? a : b);
+    }
+    return
+  }
   // card functions
   function shuffleDeck(deck) {
     let newDeck = deck;
@@ -202,9 +274,9 @@ io.on('connection', async (socket) => {
   }
   function resetHand(id) {
     cardsPlayedThisHand = [];
+    handsPlayed++;
     openingHand = false;
     io.emit('openingHand', openingHand);
-    io.emit('clearBoard');
     playerIndex = players.findIndex(player => player.id === id);
     setSuit();
     hotseat = playerIndex;
@@ -212,11 +284,16 @@ io.on('connection', async (socket) => {
   }
   socket.on('disconnect', async () => {
     console.log('disconnected ' + socket.id);
-    clearPlayerFromTeams(getPlayer(socket.id));
+    clearPlayerFromTeams(await getPlayer(socket.id));
     const newPlayerArr = players.filter((player) => player.id !== socket.id);
     players = newPlayerArr;
+    totalScore = {
+      teamOne: 0,
+      teamTwo: 0,
+    };
     updatePlayers(players);
     updateTeams(teams);
+    orderSet = false;
   });
 });
 
@@ -287,7 +364,7 @@ function getDeck() {
   return deck;
 }
 function bidsIn() {
-  return players.filter((player) => player.bid).length === 4;
+  return players.filter((player) => player.bid || player.bid === 0).length === 4;
 }
 
 function getRandomName() {
