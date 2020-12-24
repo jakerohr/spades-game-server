@@ -124,7 +124,7 @@ io.on('connection', async (socket) => {
     const player = getPlayer(socket.id);
     clearPlayerFromTeams(player);
     getTeam(team).players.push(player);
-    await updatePlayerProp(id, 'team', team);
+    await updatePlayerProp(socket.id, 'team', team);
     updateTeams(teams);
   });
   socket.on('bidSelect', async (newBid) => {
