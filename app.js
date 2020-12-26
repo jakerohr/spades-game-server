@@ -194,6 +194,7 @@ io.on('connection', async (socket) => {
     io.emit('getScore')
     dealer = dealer < 3 ? dealer + 1 : 0;
     io.emit('clearBoard');
+    io.emit('startRound', false);
     io.to(players[dealer].id).emit('dealPrompt')
     players.forEach(player => {
       updatePlayerProp(player.id, 'tricksTaken', 0);
