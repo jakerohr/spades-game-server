@@ -192,6 +192,7 @@ io.on('connection', async (socket) => {
   }) 
   function roundOver() {
     io.emit('getScore')
+    handsPlayed = 0;
     dealer = dealer < 3 ? dealer + 1 : 0;
     io.emit('clearBoard');
     io.emit('startRound', false);
